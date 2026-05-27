@@ -1,0 +1,28 @@
+# ワークフロー実行時に生成される一時ファイル
+output.txt
+
+# 環境変数 / 認証情報
+.env
+.env.*
+*.pem
+*.key
+credentials
+aws-credentials*
+
+# ログ
+*.log
+
+# OS / エディタ
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*~
+
+# PowerShell
+*.ps1.bak
+
+# Claude Code ローカル設定
+.claude/settings.local.json

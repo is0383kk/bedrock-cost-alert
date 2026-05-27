@@ -1,0 +1,119 @@
+name: Bedrock-Cost-Report
+
+on:
+  # 毎日 JST 12:00 (UTC 03:00) と JST 17:00 (UTC 08:00) に当月分を自動集計
+  schedule:
+    - cron: "0 3 * * *"
+    - cron: "0 8 * * *"
+
+  # 手動実行: 月とリージョンをパラメータで指定可能
+  workflow_dispatch:
+    inputs:
+      month:
+        description: "集計対象月 (YYYY-MM形式, 例: 2026-03)。空の場合は当月を自動セットします。"
+        required: false
+        default: ""
+      regions:
+        description: "集計対象リージョン (カンマ区切り, 例: ap-northeast-1,us-west-2)"
+        required: false
+        default: "ap-northeast-1"
+      alert_threshold:
+        description: "Teams アラートを送信するコスト閾値 (USD)。0 の場合は通知しません。"
+        required: false
+        default: "0"
+
+permissions:
+  # OIDC トークンの取得に必要
+  id-token: write
+  contents: read
+
+jobs:
+  report:
+    name: Generate Bedrock Cost Report
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # AWS 認証 (OIDC)
+      # リポジトリの Settings > Secrets and variables > Actions に
+      # 以下の変数を設定してください:
+      #   AWS_ROLE_ARN   : 実行に使用する IAM ロール ARN
+      #   AWS_REGION     : デフォルトリージョン (例: ap-northeast-1)
+      # -----------------------------------------------------------------------
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION || 'ap-northeast-1' }}
+
+      - name: Install PowerShell
+        run: |
+          sudo apt-get update -y -q
+          sudo apt-get install -y -q powershell
+
+      # -----------------------------------------------------------------------
+      # 実行パラメータの決定
+      # - スケジュール実行: 当月を自動算出
+      # - 手動実行: ワークフロー入力値を使用
+      # -----------------------------------------------------------------------
+      - name: Resolve parameters
+        id: params
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # 当月を YYYY-MM 形式で算出
+            MONTH=$(date -u +%Y-%m)
+            REGIONS="ap-northeast-1"
+            ALERT_THRESHOLD="1000"
+          else
+            # 手動実行: month が空の場合は当月を自動セット
+            MONTH="${{ github.event.inputs.month }}"
+            if [ -z "${MONTH}" ]; then
+              MONTH=$(date -u +%Y-%m)
+            fi
+            REGIONS="${{ github.event.inputs.regions }}"
+            ALERT_THRESHOLD="${{ github.event.inputs.alert_threshold }}"
+          fi
+          echo "month=${MONTH}"                    >> "$GITHUB_OUTPUT"
+          echo "regions=${REGIONS}"                >> "$GITHUB_OUTPUT"
+          echo "alert_threshold=${ALERT_THRESHOLD}" >> "$GITHUB_OUTPUT"
+
+      - name: Run Get-BedrockCost.ps1
+        id: cost
+        shell: pwsh
+        run: |
+          $Regions = "${{ steps.params.outputs.regions }}" -split ","
+
+          $Params = @{
+            Regions        = $Regions
+            Month          = "${{ steps.params.outputs.month }}"
+            AlertThreshold = [double]"${{ steps.params.outputs.alert_threshold }}"
+            TeamsWebhookUrl = "${{ secrets.TEAMS_WEBHOOK_URL }}"
+          }
+
+          $Output = & ./Get-BedrockCost.ps1 @Params 2>&1
+          $ExitCode = $LASTEXITCODE
+
+          # コンソールに出力
+          $Output | ForEach-Object { Write-Host $_ }
+
+          # Job Summary 用にファイルへ保存
+          $Output | Out-File -FilePath output.txt -Encoding utf8
+
+          exit $ExitCode
+
+      - name: Write Job Summary
+        if: always()
+        run: |
+          {
+            echo "## Bedrock Cost Report"
+            echo ""
+            echo "**集計対象月**: ${{ steps.params.outputs.month }}"
+            echo "**リージョン**: ${{ steps.params.outputs.regions }}"
+            echo ""
+            echo '```'
+            cat output.txt 2>/dev/null || echo "(出力なし)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
