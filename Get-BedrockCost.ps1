@@ -67,6 +67,8 @@ if (-not (Get-Command aws -ErrorAction SilentlyContinue)) {
 $ModelPricing = @{
     # 出典: https://platform.claude.com/docs/en/about-claude/pricing
     # CacheWrite は 5 分キャッシュの料金 (Input * 1.25)、CacheRead は Input * 0.1
+    # Claude Opus 4.8
+    "claude-opus-4-8"   = @{ Input =  5.00; Output = 25.00; CacheWrite =  6.25; CacheRead = 0.50 }
     # Claude Opus 4.7
     "claude-opus-4-7"   = @{ Input =  5.00; Output = 25.00; CacheWrite =  6.25; CacheRead = 0.50 }
     # Claude Opus 4.6
